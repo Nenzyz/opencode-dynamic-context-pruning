@@ -18,7 +18,8 @@ export default (async (ctx) => {
     // Logger uses ~/.config/opencode/logs/dcp/ for consistent log location
     const logger = new Logger(config.debug)
     const stateManager = new StateManager()
-    const janitor = new Janitor(ctx.client, stateManager, logger)
+    const toolParametersCache = new Map<string, any>() // callID -> parameters
+    const janitor = new Janitor(ctx.client, stateManager, logger, toolParametersCache)
 
     // Track pruned counts per session for this request
     const requestPrunedCounts = new Map<string, number>()
@@ -41,6 +42,33 @@ export default (async (ctx) => {
                         url: typeof input === 'string' ? input.substring(0, 80) : 'URL object',
                         messageCount: body.messages.length
                     })
+
+                    // Capture tool call parameters from assistant messages
+                    const assistantMessages = body.messages.filter((m: any) => m.role === 'assistant')
+                    for (const msg of assistantMessages) {
+                        if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+                            for (const toolCall of msg.tool_calls) {
+                                if (toolCall.id && toolCall.function) {
+                                    try {
+                                        const params = typeof toolCall.function.arguments === 'string' 
+                                            ? JSON.parse(toolCall.function.arguments)
+                                            : toolCall.function.arguments
+                                        toolParametersCache.set(toolCall.id, {
+                                            tool: toolCall.function.name,
+                                            parameters: params
+                                        })
+                                        logger.debug("global-fetch", "Cached tool parameters", {
+                                            callID: toolCall.id,
+                                            tool: toolCall.function.name,
+                                            hasParams: !!params
+                                        })
+                                    } catch (e) {
+                                        // Ignore JSON parse errors
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // Try to extract session ID from the request (might be in headers or we track it)
                     // For now, we'll use a simpler approach: collect ALL pruned IDs from all sessions
