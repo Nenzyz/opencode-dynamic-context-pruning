@@ -60,6 +60,7 @@ export interface TurnProtection {
 export interface PluginConfig {
     enabled: boolean
     debug: boolean
+    disabledProviders: string[]
     pruneNotification: "off" | "minimal" | "detailed"
     pruneNotificationType: "chat" | "toast"
     commands: Commands
@@ -91,6 +92,7 @@ export const VALID_CONFIG_KEYS = new Set([
     "$schema",
     "enabled",
     "debug",
+    "disabledProviders",
     "showUpdateToasts", // Deprecated but kept for backwards compatibility
     "pruneNotification",
     "pruneNotificationType",
@@ -165,6 +167,21 @@ function validateConfigTypes(config: Record<string, any>): ValidationError[] {
     }
     if (config.debug !== undefined && typeof config.debug !== "boolean") {
         errors.push({ key: "debug", expected: "boolean", actual: typeof config.debug })
+    }
+    if (config.disabledProviders !== undefined) {
+        if (!Array.isArray(config.disabledProviders)) {
+            errors.push({
+                key: "disabledProviders",
+                expected: "string[]",
+                actual: typeof config.disabledProviders,
+            })
+        } else if (!config.disabledProviders.every((v) => typeof v === "string")) {
+            errors.push({
+                key: "disabledProviders",
+                expected: "string[]",
+                actual: "non-string entries",
+            })
+        }
     }
     if (config.pruneNotification !== undefined) {
         const validValues = ["off", "minimal", "detailed"]
@@ -488,6 +505,7 @@ function showConfigValidationWarnings(
 const defaultConfig: PluginConfig = {
     enabled: true,
     debug: false,
+    disabledProviders: [],
     pruneNotification: "detailed",
     pruneNotificationType: "chat",
     commands: {
@@ -714,6 +732,7 @@ function mergeCommands(
 function deepCloneConfig(config: PluginConfig): PluginConfig {
     return {
         ...config,
+        disabledProviders: [...config.disabledProviders],
         commands: {
             enabled: config.commands.enabled,
             protectedTools: [...config.commands.protectedTools],
@@ -771,6 +790,12 @@ export function getConfig(ctx: PluginInput): PluginConfig {
             config = {
                 enabled: result.data.enabled ?? config.enabled,
                 debug: result.data.debug ?? config.debug,
+                disabledProviders: [
+                    ...new Set([
+                        ...config.disabledProviders,
+                        ...(result.data.disabledProviders ?? []),
+                    ]),
+                ],
                 pruneNotification: result.data.pruneNotification ?? config.pruneNotification,
                 pruneNotificationType:
                     result.data.pruneNotificationType ?? config.pruneNotificationType,
@@ -816,6 +841,12 @@ export function getConfig(ctx: PluginInput): PluginConfig {
             config = {
                 enabled: result.data.enabled ?? config.enabled,
                 debug: result.data.debug ?? config.debug,
+                disabledProviders: [
+                    ...new Set([
+                        ...config.disabledProviders,
+                        ...(result.data.disabledProviders ?? []),
+                    ]),
+                ],
                 pruneNotification: result.data.pruneNotification ?? config.pruneNotification,
                 pruneNotificationType:
                     result.data.pruneNotificationType ?? config.pruneNotificationType,
@@ -858,6 +889,12 @@ export function getConfig(ctx: PluginInput): PluginConfig {
             config = {
                 enabled: result.data.enabled ?? config.enabled,
                 debug: result.data.debug ?? config.debug,
+                disabledProviders: [
+                    ...new Set([
+                        ...config.disabledProviders,
+                        ...(result.data.disabledProviders ?? []),
+                    ]),
+                ],
                 pruneNotification: result.data.pruneNotification ?? config.pruneNotification,
                 pruneNotificationType:
                     result.data.pruneNotificationType ?? config.pruneNotificationType,

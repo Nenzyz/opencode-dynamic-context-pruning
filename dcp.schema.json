@@ -20,6 +20,14 @@
             "default": false,
             "description": "Enable debug logging"
         },
+        "disabledProviders": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "default": [],
+            "description": "List of provider IDs for which DCP should be disabled (e.g., ['anthropic'] to disable for Claude models)"
+        },
         "pruneNotification": {
             "type": "string",
             "enum": ["off", "minimal", "detailed"],
