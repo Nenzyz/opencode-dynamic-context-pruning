@@ -34,6 +34,7 @@ export interface Prune {
 export interface SessionState {
     sessionId: string | null
     isSubAgent: boolean
+    currentProvider: string | undefined
     prune: Prune
     compressSummaries: CompressSummary[]
     stats: SessionStats

@@ -19,6 +19,18 @@ const INTERNAL_AGENT_SIGNATURES = [
     "Summarize what was done in this conversation",
 ]
 
+function isProviderDisabled(state: SessionState, config: PluginConfig, logger: Logger): boolean {
+    if (
+        state.currentProvider &&
+        config.disabledProviders.length > 0 &&
+        config.disabledProviders.includes(state.currentProvider)
+    ) {
+        logger.debug("DCP disabled for provider", { provider: state.currentProvider })
+        return true
+    }
+    return false
+}
+
 export function createSystemPromptHandler(
     state: SessionState,
     logger: Logger,
@@ -34,6 +46,10 @@ export function createSystemPromptHandler(
         }
 
         if (state.isSubAgent) {
+            return
+        }
+
+        if (isProviderDisabled(state, config, logger)) {
             return
         }
 
@@ -67,6 +83,10 @@ export function createChatMessageTransformHandler(
         await checkSession(client, state, logger, output.messages)
 
         if (state.isSubAgent) {
+            return
+        }
+
+        if (isProviderDisabled(state, config, logger)) {
             return
         }
 

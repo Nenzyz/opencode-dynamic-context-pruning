@@ -47,6 +47,7 @@ export function createSessionState(): SessionState {
     return {
         sessionId: null,
         isSubAgent: false,
+        currentProvider: undefined,
         prune: {
             toolIds: new Set<string>(),
             messageIds: new Set<string>(),
@@ -70,6 +71,7 @@ export function createSessionState(): SessionState {
 export function resetSessionState(state: SessionState): void {
     state.sessionId = null
     state.isSubAgent = false
+    state.currentProvider = undefined
     state.prune = {
         toolIds: new Set<string>(),
         messageIds: new Set<string>(),

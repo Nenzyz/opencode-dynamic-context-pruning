@@ -51,6 +51,13 @@ const plugin: Plugin = (async (ctx) => {
             // Cache variant from real user messages (not synthetic)
             // This avoids scanning all messages to find variant
             state.variant = input.variant
+            // Cache provider for disabledProviders check
+            if (input.model?.providerID) {
+                state.currentProvider = input.model.providerID
+                logger.debug("Cached provider from chat.message hook", {
+                    provider: input.model.providerID,
+                })
+            }
             logger.debug("Cached variant from chat.message hook", { variant: input.variant })
         },
         "command.execute.before": createCommandExecuteHandler(
