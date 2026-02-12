@@ -64,6 +64,27 @@
                 "protectedTools": []
             }
         },
+        "manualMode": {
+            "type": "object",
+            "description": "Manual mode behavior for context management tools",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Start new sessions with manual mode enabled"
+                },
+                "automaticStrategies": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "When manual mode is enabled, keep automatic deduplication/supersede/purge strategies running"
+                }
+            },
+            "default": {
+                "enabled": false,
+                "automaticStrategies": true
+            }
+        },
         "turnProtection": {
             "type": "object",
             "description": "Protect recent tool outputs from being pruned",
@@ -129,6 +150,21 @@
                                     "pattern": "^\\d+(?:\\.\\d+)?%$"
                                 }
                             ]
+                        },
+                        "modelLimits": {
+                            "description": "Model-specific context limits by exact provider/model key. Examples: \"openai/gpt-5\", \"anthropic/claude-3-7-sonnet\", \"ollama/llama3.1\"",
+                            "type": "object",
+                            "additionalProperties": {
+                                "oneOf": [
+                                    {
+                                        "type": "number"
+                                    },
+                                    {
+                                        "type": "string",
+                                        "pattern": "^\\d+(?:\\.\\d+)?%$"
+                                    }
+                                ]
+                            }
                         }
                     }
                 },

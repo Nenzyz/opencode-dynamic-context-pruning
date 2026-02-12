@@ -6,6 +6,7 @@ import {
     findLastCompactionTimestamp,
     countTurns,
     resetOnCompaction,
+    loadPruneMap,
 } from "./utils"
 import { getLastUserMessage } from "../shared-utils"
 
@@ -14,6 +15,7 @@ export const checkSession = async (
     state: SessionState,
     logger: Logger,
     messages: WithParts[],
+    manualModeDefault: boolean,
 ): Promise<void> => {
     const lastUserMessage = getLastUserMessage(messages)
     if (!lastUserMessage) {
@@ -25,7 +27,14 @@ export const checkSession = async (
     if (state.sessionId === null || state.sessionId !== lastSessionId) {
         logger.info(`Session changed: ${state.sessionId} -> ${lastSessionId}`)
         try {
-            await ensureSessionInitialized(client, state, lastSessionId, logger, messages)
+            await ensureSessionInitialized(
+                client,
+                state,
+                lastSessionId,
+                logger,
+                messages,
+                manualModeDefault,
+            )
         } catch (err: any) {
             logger.error("Failed to initialize session state", { error: err.message })
         }
@@ -48,9 +57,11 @@ export function createSessionState(): SessionState {
         sessionId: null,
         isSubAgent: false,
         currentProvider: undefined,
+        manualMode: false,
+        pendingManualTrigger: null,
         prune: {
-            toolIds: new Set<string>(),
-            messageIds: new Set<string>(),
+            tools: new Map<string, number>(),
+            messages: new Map<string, number>(),
         },
         compressSummaries: [],
         stats: {
@@ -72,9 +83,11 @@ export function resetSessionState(state: SessionState): void {
     state.sessionId = null
     state.isSubAgent = false
     state.currentProvider = undefined
+    state.manualMode = false
+    state.pendingManualTrigger = null
     state.prune = {
-        toolIds: new Set<string>(),
-        messageIds: new Set<string>(),
+        tools: new Map<string, number>(),
+        messages: new Map<string, number>(),
     }
     state.compressSummaries = []
     state.stats = {
@@ -97,20 +110,22 @@ export async function ensureSessionInitialized(
     sessionId: string,
     logger: Logger,
     messages: WithParts[],
+    manualModeDefault: boolean,
 ): Promise<void> {
     if (state.sessionId === sessionId) {
         return
     }
 
-    logger.info("session ID = " + sessionId)
-    logger.info("Initializing session state", { sessionId: sessionId })
+    // logger.info("session ID = " + sessionId)
+    // logger.info("Initializing session state", { sessionId: sessionId })
 
     resetSessionState(state)
+    state.manualMode = manualModeDefault
     state.sessionId = sessionId
 
     const isSubAgent = await isSubAgentSession(client, sessionId)
     state.isSubAgent = isSubAgent
-    logger.info("isSubAgent = " + isSubAgent)
+    // logger.info("isSubAgent = " + isSubAgent)
 
     state.lastCompaction = findLastCompactionTimestamp(messages)
     state.currentTurn = countTurns(state, messages)
@@ -120,10 +135,8 @@ export async function ensureSessionInitialized(
         return
     }
 
-    state.prune = {
-        toolIds: new Set(persisted.prune.toolIds || []),
-        messageIds: new Set(persisted.prune.messageIds || []),
-    }
+    state.prune.tools = loadPruneMap(persisted.prune.tools, persisted.prune.toolIds)
+    state.prune.messages = loadPruneMap(persisted.prune.messages, persisted.prune.messageIds)
     state.compressSummaries = persisted.compressSummaries || []
     state.stats = {
         pruneTokenCounter: persisted.stats?.pruneTokenCounter || 0,

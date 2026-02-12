@@ -27,14 +27,21 @@ export interface CompressSummary {
 }
 
 export interface Prune {
-    toolIds: Set<string>
-    messageIds: Set<string>
+    tools: Map<string, number>
+    messages: Map<string, number>
+}
+
+export interface PendingManualTrigger {
+    sessionId: string
+    prompt: string
 }
 
 export interface SessionState {
     sessionId: string | null
     isSubAgent: boolean
     currentProvider: string | undefined
+    manualMode: boolean
+    pendingManualTrigger: PendingManualTrigger | null
     prune: Prune
     compressSummaries: CompressSummary[]
     stats: SessionStats

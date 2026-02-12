@@ -28,6 +28,7 @@ export interface ToolSettings {
     nudgeFrequency: number
     protectedTools: string[]
     contextLimit: number | `${number}%`
+    modelLimits?: Record<string, number | `${number}%`>
 }
 
 export interface Tools {
@@ -40,6 +41,11 @@ export interface Tools {
 export interface Commands {
     enabled: boolean
     protectedTools: string[]
+}
+
+export interface ManualModeConfig {
+    enabled: boolean
+    automaticStrategies: boolean
 }
 
 export interface SupersedeWrites {
@@ -64,6 +70,7 @@ export interface PluginConfig {
     pruneNotification: "off" | "minimal" | "detailed"
     pruneNotificationType: "chat" | "toast"
     commands: Commands
+    manualMode: ManualModeConfig
     turnProtection: TurnProtection
     protectedFilePatterns: string[]
     tools: Tools
@@ -103,12 +110,16 @@ export const VALID_CONFIG_KEYS = new Set([
     "commands",
     "commands.enabled",
     "commands.protectedTools",
+    "manualMode",
+    "manualMode.enabled",
+    "manualMode.automaticStrategies",
     "tools",
     "tools.settings",
     "tools.settings.nudgeEnabled",
     "tools.settings.nudgeFrequency",
     "tools.settings.protectedTools",
     "tools.settings.contextLimit",
+    "tools.settings.modelLimits",
     "tools.distill",
     "tools.distill.permission",
     "tools.distill.showDistillation",
@@ -138,6 +149,12 @@ function getConfigKeyPaths(obj: Record<string, any>, prefix = ""): string[] {
     for (const key of Object.keys(obj)) {
         const fullKey = prefix ? `${prefix}.${key}` : key
         keys.push(fullKey)
+
+        // modelLimits is a dynamic map keyed by providerID/modelID; do not recurse into arbitrary IDs.
+        if (fullKey === "tools.settings.modelLimits") {
+            continue
+        }
+
         if (obj[key] && typeof obj[key] === "object" && !Array.isArray(obj[key])) {
             keys.push(...getConfigKeyPaths(obj[key], fullKey))
         }
@@ -158,7 +175,7 @@ interface ValidationError {
     actual: string
 }
 
-function validateConfigTypes(config: Record<string, any>): ValidationError[] {
+export function validateConfigTypes(config: Record<string, any>): ValidationError[] {
     const errors: ValidationError[] = []
 
     // Top-level validators
@@ -272,6 +289,36 @@ function validateConfigTypes(config: Record<string, any>): ValidationError[] {
         }
     }
 
+    // Manual mode validator
+    const manualMode = config.manualMode
+    if (manualMode !== undefined) {
+        if (typeof manualMode === "object") {
+            if (manualMode.enabled !== undefined && typeof manualMode.enabled !== "boolean") {
+                errors.push({
+                    key: "manualMode.enabled",
+                    expected: "boolean",
+                    actual: typeof manualMode.enabled,
+                })
+            }
+            if (
+                manualMode.automaticStrategies !== undefined &&
+                typeof manualMode.automaticStrategies !== "boolean"
+            ) {
+                errors.push({
+                    key: "manualMode.automaticStrategies",
+                    expected: "boolean",
+                    actual: typeof manualMode.automaticStrategies,
+                })
+            }
+        } else {
+            errors.push({
+                key: "manualMode",
+                expected: "{ enabled: boolean, automaticStrategies: boolean }",
+                actual: typeof manualMode,
+            })
+        }
+    }
+
     // Tools validators
     const tools = config.tools
     if (tools) {
@@ -320,27 +367,54 @@ function validateConfigTypes(config: Record<string, any>): ValidationError[] {
                     })
                 }
             }
-        }
-        if (tools.distill) {
-            if (tools.distill.permission !== undefined) {
-                const validValues = ["ask", "allow", "deny"]
-                if (!validValues.includes(tools.distill.permission)) {
+            if (tools.settings.modelLimits !== undefined) {
+                if (
+                    typeof tools.settings.modelLimits !== "object" ||
+                    Array.isArray(tools.settings.modelLimits)
+                ) {
                     errors.push({
-                        key: "tools.distill.permission",
-                        expected: '"ask" | "allow" | "deny"',
-                        actual: JSON.stringify(tools.distill.permission),
+                        key: "tools.settings.modelLimits",
+                        expected: "Record<string, number | ${number}%>",
+                        actual: typeof tools.settings.modelLimits,
                     })
+                } else {
+                    for (const [providerModelKey, limit] of Object.entries(
+                        tools.settings.modelLimits,
+                    )) {
+                        const isValidNumber = typeof limit === "number"
+                        const isPercentString =
+                            typeof limit === "string" && /^\d+(?:\.\d+)?%$/.test(limit)
+                        if (!isValidNumber && !isPercentString) {
+                            errors.push({
+                                key: `tools.settings.modelLimits.${providerModelKey}`,
+                                expected: 'number | "${number}%"',
+                                actual: JSON.stringify(limit),
+                            })
+                        }
+                    }
                 }
             }
-            if (
-                tools.distill.showDistillation !== undefined &&
-                typeof tools.distill.showDistillation !== "boolean"
-            ) {
-                errors.push({
-                    key: "tools.distill.showDistillation",
-                    expected: "boolean",
-                    actual: typeof tools.distill.showDistillation,
-                })
+            if (tools.distill) {
+                if (tools.distill.permission !== undefined) {
+                    const validValues = ["ask", "allow", "deny"]
+                    if (!validValues.includes(tools.distill.permission)) {
+                        errors.push({
+                            key: "tools.distill.permission",
+                            expected: '"ask" | "allow" | "deny"',
+                            actual: JSON.stringify(tools.distill.permission),
+                        })
+                    }
+                }
+                if (
+                    tools.distill.showDistillation !== undefined &&
+                    typeof tools.distill.showDistillation !== "boolean"
+                ) {
+                    errors.push({
+                        key: "tools.distill.showDistillation",
+                        expected: "boolean",
+                        actual: typeof tools.distill.showDistillation,
+                    })
+                }
             }
         }
         if (tools.compress) {
@@ -511,6 +585,10 @@ const defaultConfig: PluginConfig = {
     commands: {
         enabled: true,
         protectedTools: [...DEFAULT_PROTECTED_TOOLS],
+    },
+    manualMode: {
+        enabled: false,
+        automaticStrategies: true,
     },
     turnProtection: {
         enabled: false,
@@ -702,6 +780,7 @@ function mergeTools(
                 ]),
             ],
             contextLimit: override.settings?.contextLimit ?? base.settings.contextLimit,
+            modelLimits: override.settings?.modelLimits ?? base.settings.modelLimits,
         },
         distill: {
             permission: override.distill?.permission ?? base.distill.permission,
@@ -729,6 +808,18 @@ function mergeCommands(
     }
 }
 
+function mergeManualMode(
+    base: PluginConfig["manualMode"],
+    override?: Partial<PluginConfig["manualMode"]>,
+): PluginConfig["manualMode"] {
+    if (override === undefined) return base
+
+    return {
+        enabled: override.enabled ?? base.enabled,
+        automaticStrategies: override.automaticStrategies ?? base.automaticStrategies,
+    }
+}
+
 function deepCloneConfig(config: PluginConfig): PluginConfig {
     return {
         ...config,
@@ -737,12 +828,17 @@ function deepCloneConfig(config: PluginConfig): PluginConfig {
             enabled: config.commands.enabled,
             protectedTools: [...config.commands.protectedTools],
         },
+        manualMode: {
+            enabled: config.manualMode.enabled,
+            automaticStrategies: config.manualMode.automaticStrategies,
+        },
         turnProtection: { ...config.turnProtection },
         protectedFilePatterns: [...config.protectedFilePatterns],
         tools: {
             settings: {
                 ...config.tools.settings,
                 protectedTools: [...config.tools.settings.protectedTools],
+                modelLimits: { ...config.tools.settings.modelLimits },
             },
             distill: { ...config.tools.distill },
             compress: { ...config.tools.compress },
@@ -800,6 +896,7 @@ export function getConfig(ctx: PluginInput): PluginConfig {
                 pruneNotificationType:
                     result.data.pruneNotificationType ?? config.pruneNotificationType,
                 commands: mergeCommands(config.commands, result.data.commands as any),
+                manualMode: mergeManualMode(config.manualMode, result.data.manualMode as any),
                 turnProtection: {
                     enabled: result.data.turnProtection?.enabled ?? config.turnProtection.enabled,
                     turns: result.data.turnProtection?.turns ?? config.turnProtection.turns,
@@ -851,6 +948,7 @@ export function getConfig(ctx: PluginInput): PluginConfig {
                 pruneNotificationType:
                     result.data.pruneNotificationType ?? config.pruneNotificationType,
                 commands: mergeCommands(config.commands, result.data.commands as any),
+                manualMode: mergeManualMode(config.manualMode, result.data.manualMode as any),
                 turnProtection: {
                     enabled: result.data.turnProtection?.enabled ?? config.turnProtection.enabled,
                     turns: result.data.turnProtection?.turns ?? config.turnProtection.turns,
@@ -899,6 +997,7 @@ export function getConfig(ctx: PluginInput): PluginConfig {
                 pruneNotificationType:
                     result.data.pruneNotificationType ?? config.pruneNotificationType,
                 commands: mergeCommands(config.commands, result.data.commands as any),
+                manualMode: mergeManualMode(config.manualMode, result.data.manualMode as any),
                 turnProtection: {
                     enabled: result.data.turnProtection?.enabled ?? config.turnProtection.enabled,
                     turns: result.data.turnProtection?.turns ?? config.turnProtection.turns,

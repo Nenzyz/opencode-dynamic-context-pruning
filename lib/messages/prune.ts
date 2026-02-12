@@ -2,13 +2,15 @@ import type { SessionState, WithParts } from "../state"
 import type { Logger } from "../logger"
 import type { PluginConfig } from "../config"
 import { isMessageCompacted, getLastUserMessage } from "../shared-utils"
-import { createSyntheticUserMessage, COMPRESS_SUMMARY_PREFIX } from "./utils"
+import { createSyntheticUserMessage } from "./utils"
 import type { UserMessage } from "@opencode-ai/sdk/v2"
 
 const PRUNED_TOOL_OUTPUT_REPLACEMENT =
     "[Output removed to save context - information superseded or no longer needed]"
 const PRUNED_TOOL_ERROR_INPUT_REPLACEMENT = "[input removed due to failed tool call]"
 const PRUNED_QUESTION_INPUT_REPLACEMENT = "[questions removed - see output for user's answers]"
+const PRUNED_COMPRESS_INPUT_REPLACEMENT =
+    "[compress content removed - topic retained for reference]"
 
 export const prune = (
     state: SessionState,
@@ -38,7 +40,8 @@ const pruneFullTool = (state: SessionState, logger: Logger, messages: WithParts[
             if (part.type !== "tool") {
                 continue
             }
-            if (!state.prune.toolIds.has(part.callID)) {
+
+            if (!state.prune.tools.has(part.callID)) {
                 continue
             }
             if (part.tool !== "edit" && part.tool !== "write") {
@@ -79,7 +82,7 @@ const pruneToolOutputs = (state: SessionState, logger: Logger, messages: WithPar
             if (part.type !== "tool") {
                 continue
             }
-            if (!state.prune.toolIds.has(part.callID)) {
+            if (!state.prune.tools.has(part.callID)) {
                 continue
             }
             if (part.state.status !== "completed") {
@@ -105,7 +108,14 @@ const pruneToolInputs = (state: SessionState, logger: Logger, messages: WithPart
             if (part.type !== "tool") {
                 continue
             }
-            if (!state.prune.toolIds.has(part.callID)) {
+            if (part.tool === "compress" && part.state.status === "completed") {
+                if (part.state.input?.content !== undefined) {
+                    part.state.input.content = PRUNED_COMPRESS_INPUT_REPLACEMENT
+                }
+                continue
+            }
+
+            if (!state.prune.tools.has(part.callID)) {
                 continue
             }
             if (part.state.status !== "completed") {
@@ -133,7 +143,7 @@ const pruneToolErrors = (state: SessionState, logger: Logger, messages: WithPart
             if (part.type !== "tool") {
                 continue
             }
-            if (!state.prune.toolIds.has(part.callID)) {
+            if (!state.prune.tools.has(part.callID)) {
                 continue
             }
             if (part.state.status !== "error") {
@@ -158,7 +168,7 @@ const filterCompressedRanges = (
     logger: Logger,
     messages: WithParts[],
 ): void => {
-    if (!state.prune.messageIds?.size) {
+    if (!state.prune.messages?.size) {
         return
     }
 
@@ -176,7 +186,7 @@ const filterCompressedRanges = (
 
             if (userMessage) {
                 const userInfo = userMessage.info as UserMessage
-                const summaryContent = COMPRESS_SUMMARY_PREFIX + summary.summary
+                const summaryContent = summary.summary
                 result.push(
                     createSyntheticUserMessage(userMessage, summaryContent, userInfo.variant),
                 )
@@ -193,7 +203,7 @@ const filterCompressedRanges = (
         }
 
         // Skip messages that are in the prune list
-        if (state.prune.messageIds.has(msgId)) {
+        if (state.prune.messages.has(msgId)) {
             continue
         }
 

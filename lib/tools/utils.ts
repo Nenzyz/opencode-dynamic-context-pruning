@@ -1,6 +1,7 @@
 import { partial_ratio } from "fuzzball"
-import type { WithParts, CompressSummary } from "../state"
+import type { WithParts } from "../state"
 import type { Logger } from "../logger"
+import { isIgnoredUserMessage } from "../messages/utils"
 
 export interface FuzzyConfig {
     minScore: number
@@ -25,6 +26,9 @@ function extractMessageContent(msg: WithParts): string {
 
     for (const part of parts) {
         const p = part as Record<string, unknown>
+        if ((part as any).ignored) {
+            continue
+        }
 
         switch (part.type) {
             case "text":
@@ -76,38 +80,16 @@ function extractMessageContent(msg: WithParts): string {
     return content
 }
 
-function findExactMatches(
-    messages: WithParts[],
-    searchString: string,
-    compressSummaries: CompressSummary[],
-): MatchResult[] {
+function findExactMatches(messages: WithParts[], searchString: string): MatchResult[] {
     const matches: MatchResult[] = []
-    const seenMessageIds = new Set<string>()
 
-    // Search compress summaries first
-    for (const summary of compressSummaries) {
-        if (summary.summary.includes(searchString)) {
-            const anchorIndex = messages.findIndex((m) => m.info.id === summary.anchorMessageId)
-            if (anchorIndex !== -1 && !seenMessageIds.has(summary.anchorMessageId)) {
-                seenMessageIds.add(summary.anchorMessageId)
-                matches.push({
-                    messageId: summary.anchorMessageId,
-                    messageIndex: anchorIndex,
-                    score: 100,
-                    matchType: "exact",
-                })
-            }
-        }
-    }
-
-    // Search raw messages
     for (let i = 0; i < messages.length; i++) {
         const msg = messages[i]
-        if (seenMessageIds.has(msg.info.id)) continue
-
+        if (isIgnoredUserMessage(msg)) {
+            continue
+        }
         const content = extractMessageContent(msg)
         if (content.includes(searchString)) {
-            seenMessageIds.add(msg.info.id)
             matches.push({
                 messageId: msg.info.id,
                 messageIndex: i,
@@ -123,38 +105,18 @@ function findExactMatches(
 function findFuzzyMatches(
     messages: WithParts[],
     searchString: string,
-    compressSummaries: CompressSummary[],
     minScore: number,
 ): MatchResult[] {
     const matches: MatchResult[] = []
-    const seenMessageIds = new Set<string>()
 
-    // Search compress summaries first
-    for (const summary of compressSummaries) {
-        const score = partial_ratio(searchString, summary.summary)
-        if (score >= minScore) {
-            const anchorIndex = messages.findIndex((m) => m.info.id === summary.anchorMessageId)
-            if (anchorIndex !== -1 && !seenMessageIds.has(summary.anchorMessageId)) {
-                seenMessageIds.add(summary.anchorMessageId)
-                matches.push({
-                    messageId: summary.anchorMessageId,
-                    messageIndex: anchorIndex,
-                    score,
-                    matchType: "fuzzy",
-                })
-            }
-        }
-    }
-
-    // Search raw messages
     for (let i = 0; i < messages.length; i++) {
         const msg = messages[i]
-        if (seenMessageIds.has(msg.info.id)) continue
-
+        if (isIgnoredUserMessage(msg)) {
+            continue
+        }
         const content = extractMessageContent(msg)
         const score = partial_ratio(searchString, content)
         if (score >= minScore) {
-            seenMessageIds.add(msg.info.id)
             matches.push({
                 messageId: msg.info.id,
                 messageIndex: i,
@@ -171,14 +133,13 @@ export function findStringInMessages(
     messages: WithParts[],
     searchString: string,
     logger: Logger,
-    compressSummaries: CompressSummary[] = [],
     stringType: "startString" | "endString",
     fuzzyConfig: FuzzyConfig = DEFAULT_FUZZY_CONFIG,
 ): { messageId: string; messageIndex: number } {
     const searchableMessages = messages.length > 1 ? messages.slice(0, -1) : messages
     const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined
 
-    const exactMatches = findExactMatches(searchableMessages, searchString, compressSummaries)
+    const exactMatches = findExactMatches(searchableMessages, searchString)
 
     if (exactMatches.length === 1) {
         return { messageId: exactMatches[0].messageId, messageIndex: exactMatches[0].messageIndex }
@@ -191,15 +152,10 @@ export function findStringInMessages(
         )
     }
 
-    const fuzzyMatches = findFuzzyMatches(
-        searchableMessages,
-        searchString,
-        compressSummaries,
-        fuzzyConfig.minScore,
-    )
+    const fuzzyMatches = findFuzzyMatches(searchableMessages, searchString, fuzzyConfig.minScore)
 
     if (fuzzyMatches.length === 0) {
-        if (lastMessage) {
+        if (lastMessage && !isIgnoredUserMessage(lastMessage)) {
             const lastMsgContent = extractMessageContent(lastMessage)
             const lastMsgIndex = messages.length - 1
             if (lastMsgContent.includes(searchString)) {
@@ -285,44 +241,4 @@ export function collectMessageIdsInRange(
     }
 
     return messageIds
-}
-
-export function collectContentInRange(
-    messages: WithParts[],
-    startIndex: number,
-    endIndex: number,
-): string[] {
-    const contents: string[] = []
-    for (let i = startIndex; i <= endIndex; i++) {
-        const msg = messages[i]
-        const parts = Array.isArray(msg.parts) ? msg.parts : []
-        for (const part of parts) {
-            if (part.type === "text") {
-                contents.push(part.text)
-            } else if (part.type === "tool") {
-                const toolState = part.state as any
-                if (toolState?.input) {
-                    contents.push(
-                        typeof toolState.input === "string"
-                            ? toolState.input
-                            : JSON.stringify(toolState.input),
-                    )
-                }
-                if (toolState?.status === "completed" && toolState?.output) {
-                    contents.push(
-                        typeof toolState.output === "string"
-                            ? toolState.output
-                            : JSON.stringify(toolState.output),
-                    )
-                } else if (toolState?.status === "error" && toolState?.error) {
-                    contents.push(
-                        typeof toolState.error === "string"
-                            ? toolState.error
-                            : JSON.stringify(toolState.error),
-                    )
-                }
-            }
-        }
-    }
-    return contents
 }
